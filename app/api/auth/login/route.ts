@@ -1,32 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
-import { randomBytes } from "crypto";
-import { activeTokens } from "@/lib/tokens";
+import { timingSafeEqual, createHash } from "crypto";
+import { signToken } from "@/lib/jwt";
 
-// In production, store credentials in a database or environment variables
-const VALID_CREDENTIALS = {
-  admin: "admin",
-  user: "password123",
-};
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
-function generateToken(): string {
-  return randomBytes(32).toString("hex");
+function safeCompare(a: string, b: string): boolean {
+  const bufA = createHash("sha256").update(a).digest();
+  const bufB = createHash("sha256").update(b).digest();
+  return timingSafeEqual(bufA, bufB);
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { username, password } = await req.json();
+    const body = await req.json();
+    const { username, password } = body;
 
-    if (!username || !password) {
-      return NextResponse.json(
-        { error: "Username and password required" },
-        { status: 400 }
-      );
-    }
+    console.log("INPUT_USERNAME:", username);
+    console.log("INPUT_PASSWORD:", password);
+    console.log("ENV_ADMIN_USERNAME:", ADMIN_USERNAME);
+    console.log("ADMIN_PASSWORD:", ADMIN_PASSWORD);
 
-    // Validate credentials
     if (
-      !VALID_CREDENTIALS[username as keyof typeof VALID_CREDENTIALS] ||
-      VALID_CREDENTIALS[username as keyof typeof VALID_CREDENTIALS] !== password
+      typeof username !== "string" ||
+      typeof password !== "string" ||
+      !username.trim() ||
+      !password.trim() ||
+      username.length > 64 ||
+      password.length > 128
     ) {
       return NextResponse.json(
         { error: "Invalid credentials" },
@@ -34,21 +35,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Generate unique token
-    const token = generateToken();
-
-    // Store token in the active tokens set
-    activeTokens.add(token);
-
-    return NextResponse.json(
-      {
-        token,
-        username,
-        message: "Login successful",
-      },
-      { status: 200 }
+    // Always compare both fields even if env vars are missing
+    // prevents timing attacks from short-circuiting
+    const usernameValid = safeCompare(
+      username.toLowerCase(),
+      (ADMIN_USERNAME ?? "").toLowerCase()
     );
-  } catch (error) {
+
+    const passwordValid = safeCompare(
+      password,
+      ADMIN_PASSWORD ?? ""
+    );
+
+    if (!ADMIN_USERNAME || !ADMIN_PASSWORD || !usernameValid || !passwordValid) {
+      return NextResponse.json(
+        { error: "Invalid credentials" },
+        { status: 401 }
+      );
+    }
+
+    const token = await signToken("admin");
+
+    return NextResponse.json({ token, message: "Login successful" });
+  } catch (err) {
+    console.error("SERVER ERROR:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
