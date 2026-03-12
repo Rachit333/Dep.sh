@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { run } from "@/lib/shell";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const result = await run("/usr/local/bin/deploy", ["list", "--json"]);
 
   if (result.code !== 0) {
@@ -9,6 +9,5 @@ export async function GET() {
   }
 
   const apps = JSON.parse(result.stdout || "[]");
-
   return NextResponse.json({ apps });
 }
